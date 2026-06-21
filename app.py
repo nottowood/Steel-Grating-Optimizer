@@ -1,16 +1,30 @@
 """Steel Grating Optimizer — Streamlit Application."""
 
+import json
+import os
 import streamlit as st
 import pandas as pd
 
 from csv_importer import parse_csv_dataframe
-from processor import process_panels, process_panels_optimized
+from processor import process_panels, process_panels_optimized, process_panels_with_recovery
 from product_master import build_product_catalog, SERIES_CONFIG, TYPE_CONFIG, calculate_standard_width
 from product_store import (
     add_custom_product, delete_custom_product, load_custom_products,
     hide_product, unhide_product, load_hidden_codes, unhide_all,
 )
 from models import ProductMaster
+
+
+def _load_depth_map() -> dict[str, float] | None:
+    """Load depth_map from depth_map.json if it exists."""
+    path = os.path.join(os.path.dirname(__file__), "depth_map.json")
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        return None
+    return {str(k): float(v) for k, v in data.items()}
 
 VALID_USERS = {
     "admin": "1234",
@@ -58,7 +72,7 @@ def main_app():
 
     # --- Sidebar ---
     with st.sidebar:
-        st.title("🏭 SGO v1.0.0-RC1")
+        st.title("🏭 SGO v1.1.0-RC1")
         st.caption(f"Logged in as: **{st.session_state.get('username', '')}**")
         if st.button("Logout"):
             st.session_state.clear()
@@ -231,27 +245,43 @@ def render_import_page():
 
             st.success(f"Parsed {len(panels)} panel row(s).")
 
-            col_btn1, col_btn2 = st.columns(2)
+            col_btn1, col_btn2, col_btn3 = st.columns(3)
             with col_btn1:
                 phase1_btn = st.button("Phase-1: Individual", use_container_width=True)
             with col_btn2:
-                phase2_btn = st.button("Phase-2: Optimize Project", type="primary", use_container_width=True)
+                phase2_btn = st.button("Phase-2: Optimize", use_container_width=True)
+            with col_btn3:
+                phase3_btn = st.button("Phase-3: Recovery", type="primary", use_container_width=True)
 
-            if phase1_btn or phase2_btn:
-                for key in ["processed", "summary", "warnings", "opt_summary"]:
+            if phase1_btn or phase2_btn or phase3_btn:
+                for key in ["processed", "summary", "warnings", "opt_summary",
+                             "recovery_summary", "validation_report", "recovery_report"]:
                     st.session_state.pop(key, None)
 
-                if phase2_btn:
+                if phase3_btn:
+                    depth_map = _load_depth_map()
+                    with st.spinner("Processing with Material Recovery..."):
+                        result = process_panels_with_recovery(panels, depth_map)
+                    st.session_state["processed"] = result["processed"]
+                    st.session_state["summary"] = result["summary"]
+                    st.session_state["opt_summary"] = result["opt_summary"]
+                    st.session_state["warnings"] = result["warnings"]
+                    st.session_state["recovery_summary"] = result["recovery_summary"]
+                    st.session_state["validation_report"] = result["validation_report"]
+                    st.session_state["recovery_report"] = result["recovery_report"]
+                elif phase2_btn:
                     with st.spinner("Optimizing project..."):
                         processed, summary, opt_summary, warnings = process_panels_optimized(panels)
+                    st.session_state["processed"] = processed
+                    st.session_state["summary"] = summary
                     st.session_state["opt_summary"] = opt_summary
+                    st.session_state["warnings"] = warnings
                 else:
                     with st.spinner("Processing..."):
                         processed, summary, warnings = process_panels(panels)
-
-                st.session_state["processed"] = processed
-                st.session_state["summary"] = summary
-                st.session_state["warnings"] = warnings
+                    st.session_state["processed"] = processed
+                    st.session_state["summary"] = summary
+                    st.session_state["warnings"] = warnings
 
         except Exception as e:
             st.error(f"Error reading CSV: {e}")
@@ -547,6 +577,186 @@ def render_import_page():
                     "Detail": r["detail"],
                 })
             st.dataframe(pd.DataFrame(val_rows), use_container_width=True, hide_index=True)
+
+        # --- Phase-3: Material Recovery Report ---
+        if "recovery_report" in st.session_state:
+            report = st.session_state["recovery_report"]
+            rec_summary = st.session_state["recovery_summary"]
+            val_report = st.session_state["validation_report"]
+
+            st.markdown("---")
+            st.header("Phase-3: Material Recovery Report")
+
+            # ============================================
+            # 11. Recovery Status (visible by default)
+            # ============================================
+            st.subheader("11. Recovery Status")
+
+            exec_sum = report["executive_summary"]
+            if exec_sum["recovery_status"] == "VALID":
+                st.success(
+                    f"**VALID** — {exec_sum['validation_passed']} / "
+                    f"{exec_sum['validation_total']} PASS"
+                )
+            else:
+                st.error(
+                    f"**INVALID** — {exec_sum['validation_passed']} / "
+                    f"{exec_sum['validation_total']} PASS"
+                )
+
+            r1, r2, r3 = st.columns(3)
+            r1.metric("Frozen Yield", f"{exec_sum['frozen_yield']:.2f}%")
+            r2.metric("Recovery Rate", f"{exec_sum['recovery_rate']:.2f}%")
+            r3.metric("Validation", f"{exec_sum['validation_passed']}/{exec_sum['validation_total']} PASS")
+
+            r4, r5, r6 = st.columns(3)
+            r4.metric("Recovered Area", f"{exec_sum['recovered_area_m2']:.4f} m²")
+            r5.metric("Dead Scrap Area", f"{exec_sum['dead_scrap_area_m2']:.4f} m²")
+            r6.metric("Remaining Stock", f"{exec_sum['remaining_stock_area_m2']:.4f} m²")
+
+            r7, r8 = st.columns(2)
+            r7.metric("Total Matches", exec_sum["total_matches"])
+            r8.metric("Unmatched Demands", exec_sum["total_unmatched"])
+
+            # ============================================
+            # 12. Scrap Inventory (inside expander)
+            # ============================================
+            inv = report["inventory_summary"]
+            with st.expander("12. Scrap Inventory"):
+                i1, i2, i3, i4 = st.columns(4)
+                i1.metric("Stock Pieces", inv["total_stock_pieces"])
+                i2.metric("Available", inv["available_stock_pieces"])
+                i3.metric("Depleted", inv["depleted_stock_pieces"])
+                i4.metric("Dead Scrap", inv["total_dead_scrap_pieces"])
+
+                if inv["stock_pieces"]:
+                    st.markdown("**Stock Pieces**")
+                    sp_rows = []
+                    for sp in inv["stock_pieces"]:
+                        mck = sp["mck"]
+                        sp_rows.append({
+                            "Piece ID": sp["piece_id"],
+                            "Source Mark": sp["source_mark"],
+                            "Product": sp["product_code"],
+                            "MCK": f"({mck[0]}, {mck[1]}, {mck[2]})",
+                            "Original Width (mm)": sp["original_width"],
+                            "Remaining Width (mm)": sp["remaining_width"],
+                            "Length (mm)": sp["length"],
+                            "Qty": sp["qty"],
+                            "Status": sp["status"],
+                        })
+                    st.dataframe(pd.DataFrame(sp_rows), use_container_width=True, hide_index=True)
+
+                if inv["dead_scrap"]:
+                    st.markdown("**Dead Scrap**")
+                    ds_rows = []
+                    for ds in inv["dead_scrap"]:
+                        ds_rows.append({
+                            "Scrap ID": ds["scrap_id"],
+                            "Source Mark": ds["source_mark"],
+                            "Width (mm)": ds["width"],
+                            "Length (mm)": ds["length"],
+                            "Area (m²)": ds["area_m2"],
+                            "Qty": ds["qty"],
+                            "Origin": ds["origin"],
+                            "Reason": ds["reason"],
+                        })
+                    st.dataframe(pd.DataFrame(ds_rows), use_container_width=True, hide_index=True)
+
+            # ============================================
+            # 13. Recovery Matching (inside expander)
+            # ============================================
+            with st.expander("13. Recovery Matching"):
+                match_data = report["match_summary"]
+                if match_data:
+                    st.markdown("**Matched Demands**")
+                    m_rows = []
+                    for m in match_data:
+                        m_rows.append({
+                            "Demand Mark": m["demand_mark"],
+                            "Product": m["demand_product_code"],
+                            "Expansion (mm)": m["expansion_width"],
+                            "Length (mm)": m["demand_length"],
+                            "Qty": m["demand_qty"],
+                            "Stock Piece": m["stock_piece_id"],
+                            "Source Mark": m["source_mark"],
+                            "Width Before (mm)": m["stock_width_before"],
+                            "Width After (mm)": m["stock_width_after"],
+                            "Trim (mm)": m["trim_waste"],
+                            "Post Class": m["post_consumption_class"],
+                            "Candidates": m["candidate_count"],
+                            "Decision": m["decision_reason"],
+                        })
+                    st.dataframe(pd.DataFrame(m_rows), use_container_width=True, hide_index=True)
+                else:
+                    st.info("No matches found.")
+
+                unmatched_data = report["unmatched_summary"]
+                if unmatched_data:
+                    st.markdown("**Unmatched Demands**")
+                    u_rows = []
+                    for u in unmatched_data:
+                        u_rows.append({
+                            "Mark": u["mark"],
+                            "Product": u["product_code"],
+                            "Expansion (mm)": u["expansion_width"],
+                            "Length (mm)": u["fabricated_length"],
+                            "Qty": u["qty"],
+                            "Reason": u["reason"],
+                        })
+                    st.dataframe(pd.DataFrame(u_rows), use_container_width=True, hide_index=True)
+                else:
+                    st.success("All expansion demands matched.")
+
+            # ============================================
+            # 14. Recovery Validation (visible by default)
+            # ============================================
+            st.subheader("14. Recovery Validation (R10-R21)")
+
+            val_data = report["validation_summary"]
+            if val_data["all_passed"]:
+                st.success(
+                    f"**VALID** — {val_data['passed']} / {val_data['total_rules']} PASS"
+                )
+            else:
+                st.error(
+                    f"**INVALID** — {val_data['passed']} / {val_data['total_rules']} PASS"
+                )
+
+            v_rows = []
+            for r in val_data["rules"]:
+                v_rows.append({
+                    "Rule": r["rule_id"],
+                    "Description": r["description"],
+                    "Status": r["status"],
+                    "Detail": r["detail"],
+                })
+            st.dataframe(pd.DataFrame(v_rows), use_container_width=True, hide_index=True)
+
+            # ============================================
+            # 15. Recovery Explainability (inside expander)
+            # ============================================
+            explain_data = report["explainability"]
+            if explain_data:
+                with st.expander("15. Recovery Explainability"):
+                    for entry in explain_data:
+                        etype = entry["type"]
+                        demand = entry["demand_mark"]
+                        stock = entry.get("stock_piece_id", "")
+
+                        if etype == "MATCH_APPROVED":
+                            label = f"MATCH APPROVED: {demand} -> {stock}"
+                        elif etype == "MATCH_REJECTED":
+                            label = f"MATCH REJECTED: {demand} -> {stock}"
+                        elif etype == "INVENTORY_RECLASSIFIED":
+                            label = f"RECLASSIFIED: {stock}"
+                        elif etype == "UNMATCHED":
+                            label = f"UNMATCHED: {demand}"
+                        else:
+                            label = f"{etype}: {demand}"
+
+                        with st.expander(label):
+                            st.code(entry["text"], language=None)
 
         # --- CSV Export ---
         csv_export = df_result.to_csv(index=False)

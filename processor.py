@@ -6,6 +6,9 @@ from product_master import build_product_catalog, lookup_product
 from pattern_engine import generate_patterns, select_best_pattern
 from rule_engine import apply_rules, calculate_summary
 from project_optimizer import optimize_project
+from recovery_engine import run_recovery_engine
+from recovery_validation import validate_recovery
+from recovery_report import generate_recovery_report
 
 
 def process_panels(
@@ -54,3 +57,34 @@ def process_panels_optimized(
     summary = calculate_summary(optimized)
 
     return optimized, summary, opt_summary, warnings
+
+
+def process_panels_with_recovery(
+    panels: list[FabricatedPanel],
+    depth_map: dict[str, float] | None = None,
+) -> dict:
+    """Phase-3: Process panels with Material Recovery Engine.
+
+    Runs the full Phase-1 + Phase-2 pipeline, then layers Phase-3
+    recovery on top. Frozen outputs are returned unchanged.
+
+    Args:
+        panels: Raw panels from CSV input.
+        depth_map: Product code -> load_bar_depth (mm). None is safe.
+    """
+    processed, summary, opt_summary, warnings = process_panels_optimized(panels)
+
+    catalog = build_product_catalog()
+    recovery = run_recovery_engine(processed, summary, catalog, depth_map)
+    validation = validate_recovery(recovery, processed, summary)
+    report = generate_recovery_report(recovery, validation, processed)
+
+    return {
+        "processed": processed,
+        "summary": summary,
+        "opt_summary": opt_summary,
+        "warnings": warnings,
+        "recovery_summary": recovery,
+        "validation_report": validation,
+        "recovery_report": report,
+    }

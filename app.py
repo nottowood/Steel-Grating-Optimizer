@@ -1,0 +1,698 @@
+"""Steel Grating Optimizer — Streamlit Application."""
+
+import streamlit as st
+import pandas as pd
+
+from csv_importer import parse_csv_dataframe
+from processor import process_panels, process_panels_optimized
+from product_master import build_product_catalog, SERIES_CONFIG, TYPE_CONFIG, calculate_standard_width
+from product_store import (
+    add_custom_product, delete_custom_product, load_custom_products,
+    hide_product, unhide_product, load_hidden_codes, unhide_all,
+)
+from models import ProductMaster
+
+VALID_USERS = {
+    "admin": "1234",
+}
+
+
+def login_page():
+    """Render the login page."""
+    st.set_page_config(page_title="SGO — Login", page_icon="🔐", layout="centered")
+
+    st.markdown(
+        """
+        <div style="text-align:center; padding-top:60px;">
+            <h1>🏭 Steel Grating Optimizer</h1>
+            <p style="color:gray;">Version 1.0.0</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("---")
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.subheader("Login")
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+
+        if st.button("Login", use_container_width=True):
+            if username in VALID_USERS and VALID_USERS[username] == password:
+                st.session_state["authenticated"] = True
+                st.session_state["username"] = username
+                st.rerun()
+            else:
+                st.error("Invalid username or password.")
+
+
+def main_app():
+    """Render the main application after login."""
+    st.set_page_config(
+        page_title="Steel Grating Optimizer",
+        page_icon="🏭",
+        layout="wide",
+    )
+
+    # --- Sidebar ---
+    with st.sidebar:
+        st.title("🏭 SGO v1.0.0-RC1")
+        st.caption(f"Logged in as: **{st.session_state.get('username', '')}**")
+        if st.button("Logout"):
+            st.session_state.clear()
+            st.rerun()
+        st.markdown("---")
+        page = st.radio("Navigation", ["Import & Process", "Product Catalog"])
+
+    if page == "Product Catalog":
+        render_catalog_page()
+    else:
+        render_import_page()
+
+
+def render_catalog_page():
+    """Display the product master catalog with add/delete functionality."""
+    st.header("Product Catalog")
+
+    # --- Show success/error messages from previous action ---
+    if "catalog_msg" in st.session_state:
+        msg_type, msg_text = st.session_state.pop("catalog_msg")
+        if msg_type == "success":
+            st.success(msg_text)
+        elif msg_type == "error":
+            st.error(msg_text)
+
+    # --- Add New Product ---
+    with st.expander("➕ เพิ่มรายการสินค้าใหม่"):
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            new_code = st.text_input("Product Code", placeholder="e.g. TA140/1", key="add_code")
+        with col_b:
+            new_series = st.selectbox("Series", [1, 2, 3], key="add_series")
+        with col_c:
+            new_type = st.selectbox("Type", ["A", "B"], key="add_type")
+
+        col_d, col_e, col_f = st.columns(3)
+        s_cfg = SERIES_CONFIG[new_series]
+        t_cfg = TYPE_CONFIG[new_type]
+        with col_d:
+            new_pitch = st.number_input("Load Bar Pitch (mm)", value=s_cfg["load_bar_pitch"], min_value=1.0, key="add_pitch")
+        with col_e:
+            new_bar_count = st.number_input("Load Bar Count", value=s_cfg["load_bar_count"], min_value=2, key="add_barcount")
+        with col_f:
+            new_thickness = st.number_input("Thickness (mm)", value=30.0, min_value=1.0, key="add_thick")
+
+        col_g, col_h = st.columns(2)
+        with col_g:
+            new_cb_pitch = st.number_input("Cross Bar Pitch (mm)", value=t_cfg["cross_bar_pitch"], min_value=1.0, key="add_cbpitch")
+        with col_h:
+            new_front = st.number_input("Front Length (mm)", value=t_cfg["front_length"], min_value=1.0, key="add_front")
+
+        new_std_width = calculate_standard_width(new_pitch, new_bar_count, new_thickness)
+        st.info(f"Standard Width (คำนวณอัตโนมัติ): **{new_std_width:.1f} mm**")
+
+        if st.button("เพิ่มสินค้า", use_container_width=True, type="primary"):
+            if not new_code.strip():
+                st.session_state["catalog_msg"] = ("error", "กรุณาใส่ Product Code")
+            else:
+                product = ProductMaster(
+                    series=new_series,
+                    product_type=new_type,
+                    load_bar_pitch=new_pitch,
+                    load_bar_count=new_bar_count,
+                    cross_bar_pitch=new_cb_pitch,
+                    front_length=new_front,
+                    load_bar_thickness=new_thickness,
+                    standard_width=new_std_width,
+                )
+                code_upper = new_code.strip().upper()
+                add_custom_product(code_upper, product)
+                st.session_state["catalog_msg"] = ("success", f"เพิ่ม {code_upper} เรียบร้อยแล้ว")
+            st.rerun()
+
+    st.markdown("---")
+
+    # --- Display Catalog with Delete Buttons ---
+    catalog = build_product_catalog()
+    custom_codes = set(load_custom_products().keys())
+    hidden_codes = load_hidden_codes()
+
+    rows = []
+    for code, p in catalog.items():
+        rows.append({
+            "Code": code,
+            "Series": p.series,
+            "Type": f"T{p.product_type}",
+            "Pitch (mm)": p.load_bar_pitch,
+            "Bar Count": p.load_bar_count,
+            "CB Pitch (mm)": p.cross_bar_pitch,
+            "Thickness (mm)": p.load_bar_thickness,
+            "Std Width (mm)": p.standard_width,
+            "Source": "Custom" if code in custom_codes else "Standard",
+        })
+
+    df = pd.DataFrame(rows)
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        series_filter = st.multiselect("Filter by Series", [1, 2, 3], default=[1, 2, 3])
+    with col2:
+        type_filter = st.multiselect("Filter by Type", ["TA", "TB"], default=["TA", "TB"])
+    with col3:
+        source_filter = st.multiselect("Filter by Source", ["Standard", "Custom"], default=["Standard", "Custom"])
+
+    filtered = df[
+        df["Series"].isin(series_filter)
+        & df["Type"].isin(type_filter)
+        & df["Source"].isin(source_filter)
+    ]
+
+    st.dataframe(filtered, use_container_width=True, hide_index=True)
+    st.caption(f"Total products: {len(filtered)} (Standard: {len(filtered[filtered['Source']=='Standard'])}, Custom: {len(filtered[filtered['Source']=='Custom'])})")
+
+    # --- Delete Section ---
+    st.markdown("---")
+    with st.expander("🗑️ ลบรายการสินค้า"):
+        all_codes = sorted(catalog.keys())
+        del_code = st.selectbox("เลือก Product ที่ต้องการลบ", all_codes, key="del_select")
+
+        if del_code:
+            is_custom = del_code in custom_codes
+            label = "Custom" if is_custom else "Standard"
+            st.caption(f"**{del_code}** — {label}")
+
+            if st.button(f"ลบ {del_code}", type="secondary", use_container_width=True):
+                if is_custom:
+                    delete_custom_product(del_code)
+                    st.session_state["catalog_msg"] = ("success", f"ลบ {del_code} (Custom) เรียบร้อยแล้ว")
+                else:
+                    hide_product(del_code)
+                    st.session_state["catalog_msg"] = ("success", f"ซ่อน {del_code} (Standard) เรียบร้อยแล้ว")
+                st.rerun()
+
+    # --- Restore hidden products ---
+    if hidden_codes:
+        with st.expander(f"♻️ กู้คืนรายการที่ซ่อน ({len(hidden_codes)} รายการ)"):
+            restore_code = st.selectbox("เลือก Product ที่ต้องการกู้คืน", hidden_codes, key="restore_select")
+            col_r1, col_r2 = st.columns(2)
+            with col_r1:
+                if st.button(f"กู้คืน {restore_code}", use_container_width=True):
+                    unhide_product(restore_code)
+                    st.session_state["catalog_msg"] = ("success", f"กู้คืน {restore_code} เรียบร้อยแล้ว")
+                    st.rerun()
+            with col_r2:
+                if st.button("กู้คืนทั้งหมด", use_container_width=True):
+                    unhide_all()
+                    st.session_state["catalog_msg"] = ("success", f"กู้คืนทั้งหมด {len(hidden_codes)} รายการเรียบร้อยแล้ว")
+                    st.rerun()
+
+
+def render_import_page():
+    """Import CSV and process panels."""
+    st.header("Import & Process Fabricated Panels")
+
+    st.subheader("1. Upload CSV")
+    st.caption("Format: Mark, Product, Width, Length, Qty")
+
+    uploaded = st.file_uploader("Choose a CSV file", type=["csv"])
+
+    if uploaded is not None:
+        try:
+            df_raw = pd.read_csv(uploaded)
+            st.subheader("2. Raw Data Preview")
+            st.dataframe(df_raw, use_container_width=True, hide_index=True)
+
+            panels = parse_csv_dataframe(df_raw)
+            if not panels:
+                st.error("No valid panels found in CSV.")
+                return
+
+            st.success(f"Parsed {len(panels)} panel row(s).")
+
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                phase1_btn = st.button("Phase-1: Individual", use_container_width=True)
+            with col_btn2:
+                phase2_btn = st.button("Phase-2: Optimize Project", type="primary", use_container_width=True)
+
+            if phase1_btn or phase2_btn:
+                for key in ["processed", "summary", "warnings", "opt_summary"]:
+                    st.session_state.pop(key, None)
+
+                if phase2_btn:
+                    with st.spinner("Optimizing project..."):
+                        processed, summary, opt_summary, warnings = process_panels_optimized(panels)
+                    st.session_state["opt_summary"] = opt_summary
+                else:
+                    with st.spinner("Processing..."):
+                        processed, summary, warnings = process_panels(panels)
+
+                st.session_state["processed"] = processed
+                st.session_state["summary"] = summary
+                st.session_state["warnings"] = warnings
+
+        except Exception as e:
+            st.error(f"Error reading CSV: {e}")
+            return
+
+    if "processed" in st.session_state:
+        processed = st.session_state["processed"]
+        summary = st.session_state["summary"]
+        warnings = st.session_state["warnings"]
+
+        if warnings:
+            st.subheader("Warnings")
+            for w in warnings:
+                st.warning(w)
+
+        st.subheader("3. Project KPI Summary")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Sold Area", f"{summary.total_sold_area:.4f} m²")
+        c2.metric("Production Area", f"{summary.total_production_area:.4f} m²")
+        c3.metric("Raw Material Area", f"{summary.total_raw_material_area:.4f} m²")
+
+        c4, c5 = st.columns(2)
+        c4.metric("Yield", f"{summary.yield_percent:.2f}%")
+        c5.metric("Scrap", f"{summary.scrap_percent:.2f}%")
+
+        c6, c7, c8 = st.columns(3)
+        c6.metric("Total Panels", summary.total_panels)
+        c7.metric("Expansion Panels", summary.expansion_count)
+        c8.metric("Reduction Panels", summary.reduction_count)
+
+        c9, c10 = st.columns(2)
+        c9.metric("Total Expansion Width", f"{summary.total_expansion_width:.2f} mm")
+        c10.metric("Total Reduction Width", f"{summary.total_reduction_width:.2f} mm")
+
+        st.caption("Yield = Sold Area / Raw Material Area | Scrap = 1 - Yield")
+
+        st.subheader("4. Detailed Results")
+        result_rows = []
+        for p in processed:
+            row = {
+                "Mark": p.mark,
+                "Product": p.product_code,
+                "Series": p.series,
+                "Type": f"T{p.product_type}",
+                "Std Width (mm)": p.standard_width,
+                "Fab Width (mm)": p.fabricated_width,
+                "Expansion Width (mm)": p.expansion_width if p.needs_expansion else 0,
+                "Reduction Width (mm)": p.reduction_width if p.needs_reduction else 0,
+                "Fab Length (mm)": p.fabricated_length,
+                "Cut Length (mm)": p.cut_length,
+                "Qty": p.qty,
+                "Sold Area (m²)": round(p.sold_area_m2, 4),
+                "Production Area (m²)": round(p.production_area_m2, 4),
+                "Raw Material Area (m²)": round(p.raw_material_area_m2, 4),
+            }
+            if p.pattern:
+                row["Rod Qty"] = p.pattern.rod_qty
+                row["Mid Length (mm)"] = p.pattern.mid_length
+                row["Start (mm)"] = p.pattern.start_length
+                row["End (mm)"] = p.pattern.end_length
+                row["Rank"] = p.pattern.rank
+                row["Selection Reason"] = p.pattern.selection_reason
+            else:
+                row["Rod Qty"] = "-"
+                row["Mid Length (mm)"] = "-"
+                row["Start (mm)"] = "-"
+                row["End (mm)"] = "-"
+                row["Rank"] = "-"
+                row["Selection Reason"] = "No valid pattern"
+            result_rows.append(row)
+
+        df_result = pd.DataFrame(result_rows)
+        st.dataframe(df_result, use_container_width=True, hide_index=True)
+
+        st.subheader("5. Pattern Audit")
+        audit_rows = []
+        for p in processed:
+            audit_rows.append({
+                "Mark": p.mark,
+                "Rod Qty": p.pattern.rod_qty if p.pattern else "-",
+                "Start Length (mm)": p.pattern.start_length if p.pattern else "-",
+                "End Length (mm)": p.pattern.end_length if p.pattern else "-",
+                "Selection Reason": p.pattern.selection_reason if p.pattern else "No valid pattern",
+            })
+        st.dataframe(pd.DataFrame(audit_rows), use_container_width=True, hide_index=True)
+
+        st.subheader("6. Pattern Details — All Candidates")
+        selected_mark = st.selectbox(
+            "Select Mark to view all candidate patterns",
+            [p.mark for p in processed],
+        )
+        selected = next((p for p in processed if p.mark == selected_mark), None)
+        if selected and selected.all_patterns:
+            if selected.pattern:
+                st.success(
+                    f"**Selected:** Rod={selected.pattern.rod_qty}, "
+                    f"Start={selected.pattern.start_length} mm | "
+                    f"{selected.pattern.selection_reason}"
+                )
+
+            pat_rows = []
+            for pat in selected.all_patterns:
+                is_selected = (
+                    selected.pattern
+                    and pat.rod_qty == selected.pattern.rod_qty
+                    and pat.start_length == selected.pattern.start_length
+                )
+                pat_rows.append({
+                    "Rank": pat.rank,
+                    "Rod Qty": pat.rod_qty,
+                    "Mid Length (mm)": pat.mid_length,
+                    "Start (mm)": pat.start_length,
+                    "End (mm)": pat.end_length,
+                    "In 40-45": "Yes" if pat.is_preferred else "-",
+                    "Score": pat.score,
+                    "": "< SELECTED" if is_selected else "",
+                })
+            df_pat = pd.DataFrame(pat_rows).sort_values("Rank")
+            st.dataframe(df_pat, use_container_width=True, hide_index=True)
+
+            st.caption(
+                "**Ranking:** "
+                "P1: Start 40-45 mm | "
+                "P2: Smallest Start Length | "
+                "P3: Max Rod Qty | "
+                "P4: Min Waste"
+            )
+        elif selected:
+            st.info("No valid patterns for this panel.")
+
+        # --- Phase-2 Optimization Report ---
+        if "opt_summary" in st.session_state:
+            opt = st.session_state["opt_summary"]
+            st.markdown("---")
+            st.header("Phase-2: Project Optimization Report")
+
+            # ============================================
+            # 7. Project Optimization Summary (TASK 5)
+            # ============================================
+            st.subheader("7. Project Optimization Summary")
+
+            o1, o2, o3 = st.columns(3)
+            o1.metric("Optimization Mode", opt.optimization_mode)
+            o2.metric("Visual Consistency Score", f"{opt.overall_consistency:.1f}")
+            o3.metric("Floor Groups", opt.total_floor_groups)
+
+            o4, o5, o6 = st.columns(3)
+            o4.metric("Coverage Panels", f"{opt.total_coverage_panels} / {opt.total_panels}")
+            o5.metric("Coverage Marks", f"{opt.total_coverage_marks} / {opt.total_marks}")
+            o6.metric("Fallback Panels", opt.total_fallback_panels)
+
+            o7, o8, o9 = st.columns(3)
+            o7.metric("Fallback Rate", f"{opt.fallback_rate:.1f}%")
+            o8.metric("Yield (Individual)", f"{opt.yield_individual:.2f}%")
+            o9.metric("Yield (Optimized)", f"{opt.yield_optimized:.2f}%")
+
+            for fg in opt.floor_groups:
+                common_label = f"{fg.common_start} mm" if fg.common_start else "N/A"
+                pref_label = "Yes" if fg.is_preferred else "No"
+                st.markdown(f"- **{fg.group_name}**: Selected Start = {common_label} | Preferred Range = {pref_label}")
+
+            st.caption("Visual Consistency Score = Panels using Common Start / Total Panels × 100 (Range: 0–100)")
+
+            # ============================================
+            # 8. Floor Group Detail Report (TASK 3)
+            # ============================================
+            st.subheader("8. Floor Group Detail Report")
+            for fg in opt.floor_groups:
+                common_label = f"{fg.common_start} mm" if fg.common_start else "N/A"
+                fallback_qty = fg.total_qty - fg.coverage_qty
+
+                with st.expander(f"{fg.group_name} | Common Start = {common_label} | Coverage = {fg.coverage_percent:.1f}%"):
+                    st.markdown(f"### Floor Group: {fg.group_name}")
+                    st.markdown(f"**Selected Common Start: {common_label}**")
+
+                    fg1, fg2 = st.columns(2)
+                    fg1.metric("Coverage (Panels)", f"{fg.coverage_qty} / {fg.total_qty}")
+                    fg2.metric("Coverage (Marks)", f"{fg.coverage_marks} / {fg.total_marks}")
+
+                    fg3, fg4 = st.columns(2)
+                    fg3.metric("Coverage %", f"{fg.coverage_percent:.1f}%")
+                    fg4.metric("Fallback Panels", fallback_qty)
+
+                    fg5, fg6 = st.columns(2)
+                    fg5.metric("Preferred Range (40-45 mm)", "Yes" if fg.is_preferred else "No")
+                    yield_val = fg.yield_optimized if fg.consistency_status != "REJECTED" else fg.yield_individual
+                    fg5_val = yield_val
+                    fg5.metric("Yield", f"{fg5_val:.2f}%")
+                    scrap_val = round(100.0 - yield_val, 2)
+                    fg6.metric("Scrap", f"{scrap_val:.2f}%")
+
+                    # Panels using Common Start
+                    if fg.common_start_marks:
+                        st.markdown("**Panels Using Common Start:**")
+                        st.markdown(", ".join(f"`{m}`" for m in fg.common_start_marks))
+
+                    # Fallback Panels
+                    if fg.fallback_marks:
+                        st.markdown("**Fallback Panels:**")
+                        for fm in fg.fallback_marks:
+                            assign = next((a for a in fg.assignments if a.mark == fm), None)
+                            reason = assign.reason if assign else "No matching pattern"
+                            st.markdown(f"- `{fm}` — {reason}")
+
+                    # Panel Assignment Table
+                    if fg.assignments:
+                        st.markdown("**Panel Assignment:**")
+                        assign_rows = []
+                        for a in fg.assignments:
+                            assign_rows.append({
+                                "Mark": a.mark,
+                                "Start (mm)": a.start_length,
+                                "Rod Qty": a.rod_qty,
+                                "Assignment": a.assignment_type,
+                                "Reason": a.reason,
+                            })
+                        st.dataframe(pd.DataFrame(assign_rows), use_container_width=True, hide_index=True)
+
+            # ============================================
+            # 9. Scenario Comparison (TASK 1 + TASK 2)
+            # ============================================
+            st.subheader("9. Scenario Comparison")
+            for fg in opt.floor_groups:
+                if not fg.all_scenarios:
+                    continue
+
+                st.markdown(f"### Floor Group: {fg.group_name}")
+
+                cand_rows = []
+                for sc in fg.all_scenarios:
+                    cand_rows.append({
+                        "Start (mm)": sc.representative_start,
+                        "Coverage %": f"{sc.coverage_percent:.1f}%",
+                        "Coverage Qty": sc.coverage_qty,
+                        "Preferred?": "Yes" if sc.is_preferred else "No",
+                        "Avg Rod Qty": sc.avg_rod_qty,
+                        "Yield %": f"{sc.yield_optimized:.2f}%",
+                        "Coverage Score": sc.score_breakdown.get("coverage", 0),
+                        "Preferred Score": sc.score_breakdown.get("preferred", 0),
+                        "Rod Bonus Score": sc.score_breakdown.get("rod_bonus", 0),
+                        "Yield Score": sc.score_breakdown.get("yield", 0),
+                        "Total Score": sc.score,
+                        "Selected": "YES" if sc.selected else "NO",
+                        "Reason": "Selected" if sc.selected else sc.rejection_reason,
+                    })
+                df_cand = pd.DataFrame(cand_rows)
+                st.dataframe(df_cand, use_container_width=True, hide_index=True)
+
+                st.caption(
+                    "**Score Formula:** Coverage (1000 × coverage%) + "
+                    "Preferred (500 if 40-45mm) + "
+                    "Rod Bonus (0.5 × avg rod qty) + "
+                    "Yield (50 × yield%) + "
+                    "Fallback (-100 per fallback mark)"
+                )
+
+                # Decision Explanation
+                best = next((sc for sc in fg.all_scenarios if sc.selected), None)
+                if best:
+                    st.markdown("**Optimization Decision Summary**")
+                    yield_impact = round(best.yield_optimized - fg.yield_individual, 2) if fg.yield_individual else 0.0
+                    st.markdown(
+                        f"- **Selected Start** = {best.representative_start} mm\n"
+                        f"- **Coverage** = {best.coverage_percent:.1f}%\n"
+                        f"- **Preferred Range (40–45 mm)** = {'Yes' if best.is_preferred else 'No'}\n"
+                        f"- **Yield Impact** = {yield_impact:+.2f}%\n"
+                        f"- **Fallback Required** = {'Yes' if best.fallback_count > 0 else 'No'}"
+                        f"{f' ({best.fallback_count} marks)' if best.fallback_count > 0 else ''}\n"
+                        f"- **Final Score** = {best.score}\n\n"
+                        f"**Decision:** Highest project consistency."
+                    )
+                st.markdown("---")
+
+            # ============================================
+            # 10. Phase-2 Validation (TASK 4)
+            # ============================================
+            st.subheader("10. Phase-2 Validation")
+
+            validation_rules = _run_validation(opt, processed, summary)
+            all_pass = all(r["status"] == "PASS" for r in validation_rules)
+
+            if all_pass:
+                st.success("PHASE-2 VALIDATION: PASS")
+            else:
+                st.error("PHASE-2 VALIDATION: FAIL")
+
+            val_rows = []
+            for r in validation_rules:
+                val_rows.append({
+                    "Rule": r["rule"],
+                    "Description": r["description"],
+                    "Status": r["status"],
+                    "Detail": r["detail"],
+                })
+            st.dataframe(pd.DataFrame(val_rows), use_container_width=True, hide_index=True)
+
+        # --- CSV Export ---
+        csv_export = df_result.to_csv(index=False)
+        st.download_button(
+            "Download Results CSV",
+            csv_export,
+            file_name="sgo_results.csv",
+            mime="text/csv",
+        )
+
+
+def _run_validation(opt, processed, summary) -> list[dict]:
+    """Run 8 engineering validation rules against optimization results."""
+    rules = []
+
+    # Rule 1: Selected Start Exists
+    starts_exist = all(fg.common_start is not None for fg in opt.floor_groups if fg.consistency_status != "REJECTED")
+    rules.append({
+        "rule": "Rule 1",
+        "description": "Selected Start Exists",
+        "status": "PASS" if starts_exist else "FAIL",
+        "detail": "All floor groups have a selected common start" if starts_exist else "Missing common start in one or more groups",
+    })
+
+    # Rule 2: Selected Start Appears In Scenario Table
+    start_in_table = True
+    detail_r2 = []
+    for fg in opt.floor_groups:
+        if fg.common_start is None:
+            continue
+        scenario_starts = [sc.representative_start for sc in fg.all_scenarios]
+        if fg.common_start not in scenario_starts:
+            start_in_table = False
+            detail_r2.append(f"{fg.group_name}: Start {fg.common_start} mm not in scenario table")
+    rules.append({
+        "rule": "Rule 2",
+        "description": "Selected Start Appears In Scenario Table",
+        "status": "PASS" if start_in_table else "FAIL",
+        "detail": "All selected starts appear in scenario comparison" if start_in_table else "; ".join(detail_r2),
+    })
+
+    # Rule 3: Coverage >= 90%
+    coverage_ok = opt.overall_consistency >= 90.0
+    rules.append({
+        "rule": "Rule 3",
+        "description": "Coverage >= 90%",
+        "status": "PASS" if coverage_ok else "FAIL",
+        "detail": f"Overall consistency = {opt.overall_consistency:.1f}%",
+    })
+
+    # Rule 4: Fallback Rate <= 10%
+    fallback_ok = opt.fallback_rate <= 10.0
+    rules.append({
+        "rule": "Rule 4",
+        "description": "Fallback Rate <= 10%",
+        "status": "PASS" if fallback_ok else "FAIL",
+        "detail": f"Fallback rate = {opt.fallback_rate:.1f}%",
+    })
+
+    # Rule 5: Visual Consistency >= 80%
+    visual_ok = opt.overall_consistency >= 80.0
+    rules.append({
+        "rule": "Rule 5",
+        "description": "Visual Consistency >= 80%",
+        "status": "PASS" if visual_ok else "FAIL",
+        "detail": f"Visual consistency = {opt.overall_consistency:.1f}%",
+    })
+
+    # Rule 6: Yield Calculated
+    yield_ok = opt.yield_optimized > 0
+    rules.append({
+        "rule": "Rule 6",
+        "description": "Yield Calculated",
+        "status": "PASS" if yield_ok else "FAIL",
+        "detail": f"Yield = {opt.yield_optimized:.2f}%",
+    })
+
+    # Rule 7: Raw Material Area >= Production Area
+    rawmat_ok = summary.total_raw_material_area >= summary.total_production_area
+    rules.append({
+        "rule": "Rule 7",
+        "description": "Raw Material Area >= Production Area",
+        "status": "PASS" if rawmat_ok else "FAIL",
+        "detail": f"Raw Material = {summary.total_raw_material_area:.4f} m², Production = {summary.total_production_area:.4f} m²",
+    })
+
+    # Rule 8: No Missing Candidate Data
+    missing = False
+    missing_detail = []
+    for fg in opt.floor_groups:
+        for sc in fg.all_scenarios:
+            if sc.representative_start <= 0:
+                missing = True
+                missing_detail.append(f"{fg.group_name}: scenario with start <= 0")
+            if sc.score == 0 and sc.coverage_percent == 0:
+                missing = True
+                missing_detail.append(f"{fg.group_name}: scenario with zero score and zero coverage")
+    rules.append({
+        "rule": "Rule 8",
+        "description": "No Missing Candidate Data",
+        "status": "PASS" if not missing else "FAIL",
+        "detail": "All candidate data complete" if not missing else "; ".join(missing_detail),
+    })
+
+    # Rule 9: Candidate Count in Pattern Details = Candidate Count in Scenario Comparison
+    count_ok = True
+    count_detail = []
+    for fg in opt.floor_groups:
+        # Get all unique starts from Pattern Details (all_patterns of panels in this group)
+        group_panels = [p for p in processed if p.product_code == fg.group_name]
+        pattern_starts = set()
+        for p in group_panels:
+            for pat in p.all_patterns:
+                pattern_starts.add(pat.start_length)
+        # Get all starts from Scenario Comparison
+        scenario_starts = set(sc.representative_start for sc in fg.all_scenarios)
+
+        if pattern_starts != scenario_starts:
+            count_ok = False
+            missing_in_scenario = pattern_starts - scenario_starts
+            extra_in_scenario = scenario_starts - pattern_starts
+            detail_parts = [f"{fg.group_name}: Pattern Details={len(pattern_starts)}, Scenario={len(scenario_starts)}"]
+            if missing_in_scenario:
+                detail_parts.append(f"missing in scenario: {sorted(missing_in_scenario)}")
+            if extra_in_scenario:
+                detail_parts.append(f"extra in scenario: {sorted(extra_in_scenario)}")
+            count_detail.append("; ".join(detail_parts))
+        else:
+            count_detail.append(f"{fg.group_name}: {len(pattern_starts)} candidates match")
+
+    rules.append({
+        "rule": "Rule 9",
+        "description": "Candidate Count: Pattern Details = Scenario Comparison",
+        "status": "PASS" if count_ok else "FAIL",
+        "detail": "; ".join(count_detail),
+    })
+
+    return rules
+
+
+def main():
+    if st.session_state.get("authenticated"):
+        main_app()
+    else:
+        login_page()
+
+
+if __name__ == "__main__":
+    main()

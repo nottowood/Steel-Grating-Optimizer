@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install *)",
+      "Bash(python -c \"from processor import process_panels; from csv_importer import parse_csv; print\\('All imports OK'\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(streamlit run *)",
+      "mcp__Claude_in_Chrome__navigate",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "Bash(python -m streamlit run app.py --server.headless true --server.port 8501)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8501)",
+      "Bash(taskkill /F /IM streamlit.exe)",
+      "Bash(taskkill /F /FI \"WINDOWTITLE eq streamlit\")",
+      "Bash(pkill -f \"streamlit run\")",
+      "Bash(python -c \"import product_store; print\\(dir\\(product_store\\)\\)\")",
+      "Bash(rm -rf __pycache__)",
+      "Bash(taskkill //F //IM python.exe)",
+      "Bash(python -c \"from models import Pattern; p = Pattern\\(rod_qty=1, mid_length=1, start_length=1, end_length=1\\); print\\(hasattr\\(p, 'rank'\\), hasattr\\(p, 'selection_reason'\\)\\); print\\(p\\)\")",
+      "PowerShell(Remove-Item -Recurse -Force \"M:\\\\7 E&M\\\\7 E&M\\\\Nutthawut Computer\\\\Training\\\\AI Coding\\\\SGOP\\\\__pycache__\" -ErrorAction SilentlyContinue; Get-Process python -ErrorAction SilentlyContinue | Where-Object {$_.CommandLine -match 'streamlit'} | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2)",
+      "PowerShell(Start-Sleep -Seconds 5; try { $r = Invoke-WebRequest -Uri \"http://localhost:8501\" -UseBasicParsing -TimeoutSec 5; Write-Output \"HTTP $\\($r.StatusCode\\) - Server running\" } catch { Write-Output \"Server not ready: $_\" })",
+      "Bash(python -c *)",
+      "PowerShell(Get-Process python -ErrorAction SilentlyContinue)",
+      "PowerShell(Stop-Process -Name python -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; $proc = Start-Process -FilePath \"python\" -ArgumentList \"-m\", \"streamlit\", \"run\", \"app.py\", \"--server.port\", \"8501\" -WorkingDirectory \"M:\\\\7 E&M\\\\7 E&M\\\\Nutthawut Computer\\\\Training\\\\AI Coding\\\\SGOP\" -PassThru -RedirectStandardError \"M:\\\\7 E&M\\\\7 E&M\\\\Nutthawut Computer\\\\Training\\\\AI Coding\\\\SGOP\\\\stderr.log\"; $proc.Id)"
+    ]
+  }
+}

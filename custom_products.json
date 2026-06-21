@@ -1,0 +1,12 @@
+{
+  "TA325/1": {
+    "series": 1,
+    "product_type": "A",
+    "load_bar_pitch": 30.0,
+    "load_bar_count": 34,
+    "cross_bar_pitch": 100.0,
+    "front_length": 50.0,
+    "load_bar_thickness": 5.0,
+    "standard_width": 995.0
+  }
+}

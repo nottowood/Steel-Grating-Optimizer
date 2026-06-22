@@ -34,11 +34,15 @@ def load_custom_products() -> dict[str, ProductMaster]:
     return {code: _deserialize(d) for code, d in raw.items()}
 
 
-def save_custom_products(products: dict[str, ProductMaster]) -> None:
-    """Save custom products to JSON file."""
+def save_custom_products(products: dict[str, ProductMaster]) -> bool:
+    """Save custom products to JSON file. Returns False if filesystem is read-only."""
     raw = {code: _serialize(p) for code, p in products.items()}
-    with open(STORE_PATH, "w", encoding="utf-8") as f:
-        json.dump(raw, f, indent=2, ensure_ascii=False)
+    try:
+        with open(STORE_PATH, "w", encoding="utf-8") as f:
+            json.dump(raw, f, indent=2, ensure_ascii=False)
+        return True
+    except OSError:
+        return False
 
 
 def add_custom_product(code: str, product: ProductMaster) -> None:
@@ -68,10 +72,14 @@ def load_hidden_codes() -> list[str]:
         return json.load(f)
 
 
-def save_hidden_codes(codes: list[str]) -> None:
-    """Save list of hidden product codes."""
-    with open(HIDDEN_PATH, "w", encoding="utf-8") as f:
-        json.dump(sorted(set(codes)), f, indent=2, ensure_ascii=False)
+def save_hidden_codes(codes: list[str]) -> bool:
+    """Save list of hidden product codes. Returns False if filesystem is read-only."""
+    try:
+        with open(HIDDEN_PATH, "w", encoding="utf-8") as f:
+            json.dump(sorted(set(codes)), f, indent=2, ensure_ascii=False)
+        return True
+    except OSError:
+        return False
 
 
 def hide_product(code: str) -> None:

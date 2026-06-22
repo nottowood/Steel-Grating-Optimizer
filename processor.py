@@ -9,6 +9,9 @@ from project_optimizer import optimize_project
 from recovery_engine import run_recovery_engine
 from recovery_validation import validate_recovery
 from recovery_report import generate_recovery_report
+from packing_engine import run_length_packing
+from packing_validation import validate_packing
+from packing_report import generate_packing_report
 
 
 def process_panels(
@@ -88,3 +91,34 @@ def process_panels_with_recovery(
         "validation_report": validation,
         "recovery_report": report,
     }
+
+
+def process_panels_with_packing(
+    panels: list[FabricatedPanel],
+    depth_map: dict[str, float] | None = None,
+) -> dict:
+    """Phase-3.2A: Process panels with Recovery + Length Packing.
+
+    Runs the full Phase-1 + Phase-2 + Phase-3.1 pipeline, then layers
+    Phase-3.2A length packing on top. All prior outputs are returned unchanged.
+
+    Args:
+        panels: Raw panels from CSV input.
+        depth_map: Product code -> load_bar_depth (mm). None is safe.
+    """
+    result = process_panels_with_recovery(panels, depth_map)
+
+    catalog = build_product_catalog()
+    packing = run_length_packing(result["processed"], catalog, depth_map)
+    packing_val = validate_packing(
+        packing,
+        result["summary"].yield_percent,
+        result["summary"].yield_percent,
+    )
+    packing_rpt = generate_packing_report(packing, packing_val)
+
+    result["packing_summary"] = packing
+    result["packing_validation"] = packing_val
+    result["packing_report"] = packing_rpt
+
+    return result

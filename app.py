@@ -6,13 +6,15 @@ import streamlit as st
 import pandas as pd
 
 from csv_importer import parse_csv_dataframe
-from processor import process_panels, process_panels_optimized, process_panels_with_recovery
+from processor import process_panels, process_panels_optimized, process_panels_with_recovery, process_panels_with_packing
 from product_master import build_product_catalog, SERIES_CONFIG, TYPE_CONFIG, calculate_standard_width
 from product_store import (
     add_custom_product, delete_custom_product, load_custom_products,
     hide_product, unhide_product, load_hidden_codes, unhide_all,
 )
 from models import ProductMaster
+from export_pdf import generate_pdf
+from export_excel import generate_excel
 
 
 def _load_depth_map() -> dict[str, float] | None:
@@ -33,13 +35,11 @@ VALID_USERS = {
 
 def login_page():
     """Render the login page."""
-    st.set_page_config(page_title="SGO — Login", page_icon="🔐", layout="centered")
-
     st.markdown(
         """
         <div style="text-align:center; padding-top:60px;">
             <h1>🏭 Steel Grating Optimizer</h1>
-            <p style="color:gray;">Version 1.0.0</p>
+            <p style="color:gray;">Version 1.2.1</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -64,15 +64,9 @@ def login_page():
 
 def main_app():
     """Render the main application after login."""
-    st.set_page_config(
-        page_title="Steel Grating Optimizer",
-        page_icon="🏭",
-        layout="wide",
-    )
-
     # --- Sidebar ---
     with st.sidebar:
-        st.title("🏭 SGO v1.1.0-RC1")
+        st.title("🏭 SGO v1.2.1")
         st.caption(f"Logged in as: **{st.session_state.get('username', '')}**")
         if st.button("Logout"):
             st.session_state.clear()
@@ -245,20 +239,37 @@ def render_import_page():
 
             st.success(f"Parsed {len(panels)} panel row(s).")
 
-            col_btn1, col_btn2, col_btn3 = st.columns(3)
+            col_btn1, col_btn2, col_btn3, col_btn4 = st.columns(4)
             with col_btn1:
                 phase1_btn = st.button("Phase-1: Individual", use_container_width=True)
             with col_btn2:
                 phase2_btn = st.button("Phase-2: Optimize", use_container_width=True)
             with col_btn3:
-                phase3_btn = st.button("Phase-3: Recovery", type="primary", use_container_width=True)
+                phase3_btn = st.button("Phase-3: Recovery", use_container_width=True)
+            with col_btn4:
+                phase32a_btn = st.button("Phase-3.2A: Production Plan", type="primary", use_container_width=True)
 
-            if phase1_btn or phase2_btn or phase3_btn:
+            if phase1_btn or phase2_btn or phase3_btn or phase32a_btn:
                 for key in ["processed", "summary", "warnings", "opt_summary",
-                             "recovery_summary", "validation_report", "recovery_report"]:
+                             "recovery_summary", "validation_report", "recovery_report",
+                             "packing_summary", "packing_validation", "packing_report"]:
                     st.session_state.pop(key, None)
 
-                if phase3_btn:
+                if phase32a_btn:
+                    depth_map = _load_depth_map()
+                    with st.spinner("Processing with Recovery + Production Cutting Plan..."):
+                        result = process_panels_with_packing(panels, depth_map)
+                    st.session_state["processed"] = result["processed"]
+                    st.session_state["summary"] = result["summary"]
+                    st.session_state["opt_summary"] = result["opt_summary"]
+                    st.session_state["warnings"] = result["warnings"]
+                    st.session_state["recovery_summary"] = result["recovery_summary"]
+                    st.session_state["validation_report"] = result["validation_report"]
+                    st.session_state["recovery_report"] = result["recovery_report"]
+                    st.session_state["packing_summary"] = result["packing_summary"]
+                    st.session_state["packing_validation"] = result["packing_validation"]
+                    st.session_state["packing_report"] = result["packing_report"]
+                elif phase3_btn:
                     depth_map = _load_depth_map()
                     with st.spinner("Processing with Material Recovery..."):
                         result = process_panels_with_recovery(panels, depth_map)
@@ -758,14 +769,151 @@ def render_import_page():
                         with st.expander(label):
                             st.code(entry["text"], language=None)
 
-        # --- CSV Export ---
-        csv_export = df_result.to_csv(index=False)
-        st.download_button(
-            "Download Results CSV",
-            csv_export,
-            file_name="sgo_results.csv",
-            mime="text/csv",
-        )
+        # --- Phase-3.2A: Production Cutting Plan ---
+        if "packing_report" in st.session_state:
+            packing_rpt = st.session_state["packing_report"]
+            packing_sum = st.session_state["packing_summary"]
+            packing_val = st.session_state["packing_validation"]
+
+            st.markdown("---")
+            st.header("Phase-3.2A: Production Cutting Plan")
+
+            # ============================================
+            # 16. Packing KPI Summary
+            # ============================================
+            st.subheader("16. Packing KPI Summary")
+
+            pk_summary = packing_rpt["summary"]
+
+            pk1, pk2, pk3 = st.columns(3)
+            pk1.metric("Algorithm", pk_summary["algorithm"])
+            pk2.metric("Stock Lengths Before", pk_summary["stock_lengths_before"])
+            pk3.metric("Stock Lengths After", pk_summary["stock_lengths_after"])
+
+            pk4, pk5, pk6 = st.columns(3)
+            pk4.metric("Stock Savings", f"{pk_summary['stock_savings']} ({pk_summary['stock_savings_percent']:.2f}%)")
+            pk5.metric("Utilization Rate", f"{pk_summary['stock_utilization_rate']:.2f}%")
+            pk6.metric("Exact Fit Bins", pk_summary["total_exact_fit_bins"])
+
+            pk7, pk8, pk9 = st.columns(3)
+            pk7.metric("Raw Material Area", f"{pk_summary['total_raw_material_area_m2']:.4f} m²")
+            pk8.metric("Product Area", f"{pk_summary['total_product_area_m2']:.4f} m²")
+            pk9.metric("Waste Area", f"{pk_summary['total_waste_area_m2']:.4f} m²")
+
+            pk10, pk11, pk12 = st.columns(3)
+            pk10.metric("Kerf Loss", f"{pk_summary['total_kerf_loss_m2']:.4f} m²")
+            pk11.metric("Reusable Remnant", f"{pk_summary['total_reusable_remnant_area_m2']:.4f} m²")
+            pk12.metric("Length Waste", f"{pk_summary['total_length_waste_m2']:.4f} m²")
+
+            st.caption(
+                f"Total Bins: {pk_summary['total_bins']} | "
+                f"Items Packed: {pk_summary['total_items_packed']} | "
+                f"Marks Packed: {pk_summary['total_marks_packed']}"
+            )
+
+            # ============================================
+            # 17. Production Cutting Plan
+            # ============================================
+            st.subheader("17. Production Cutting Plan")
+
+            cutting_plan = packing_rpt["cutting_plan"]
+            cp_rows = []
+            for cp in cutting_plan:
+                marks_text = ", ".join(
+                    f"{e['mark']} x {e['qty']}" for e in cp["entries"]
+                )
+                cp_rows.append({
+                    "Bar": cp["bin_id"],
+                    "Width (mm)": cp["stock_width"],
+                    "Marks": marks_text,
+                    "Panels": cp["total_panels"],
+                    "Used (mm)": cp["total_used"],
+                    "Remnant (mm)": cp["remnant_length"],
+                    "Classification": cp["remnant_classification"],
+                })
+            st.dataframe(pd.DataFrame(cp_rows), use_container_width=True, hide_index=True)
+
+            with st.expander("Production Format (Copy/Paste)"):
+                for cp in cutting_plan:
+                    st.text(cp["display"])
+
+            # ============================================
+            # 18. Packing Validation (R22-R29)
+            # ============================================
+            st.subheader("18. Packing Validation (R22-R29)")
+
+            pv_data = packing_rpt["validation"]
+            if pv_data["all_passed"]:
+                st.success(f"**VALID** — {pv_data['passed']} / {pv_data['total']} PASS")
+            else:
+                st.error(f"**INVALID** — {pv_data['passed']} / {pv_data['total']} PASS")
+
+            pv_rows = []
+            for r in pv_data["rules"]:
+                pv_rows.append({
+                    "Rule": r["rule_id"],
+                    "Description": r["description"],
+                    "Status": r["status"],
+                    "Detail": r["detail"],
+                })
+            st.dataframe(pd.DataFrame(pv_rows), use_container_width=True, hide_index=True)
+
+        # --- Export Section ---
+        st.markdown("---")
+        st.subheader("Export")
+
+        if "packing_report" in st.session_state:
+            exp1, exp2, exp3 = st.columns(3)
+
+            with exp1:
+                pdf_bytes = generate_pdf(
+                    summary=summary,
+                    packing_report=st.session_state["packing_report"],
+                    packing_summary=st.session_state["packing_summary"],
+                    recovery_summary=st.session_state.get("recovery_summary"),
+                )
+                st.download_button(
+                    "Export PDF",
+                    pdf_bytes,
+                    file_name="Production_Cutting_Plan.pdf",
+                    mime="application/pdf",
+                    type="primary",
+                    use_container_width=True,
+                )
+
+            with exp2:
+                xlsx_bytes = generate_excel(
+                    summary=summary,
+                    packing_report=st.session_state["packing_report"],
+                    packing_summary=st.session_state["packing_summary"],
+                    recovery_summary=st.session_state.get("recovery_summary"),
+                )
+                st.download_button(
+                    "Export Excel",
+                    xlsx_bytes,
+                    file_name="Production_Cutting_Plan.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="primary",
+                    use_container_width=True,
+                )
+
+            with exp3:
+                csv_export = df_result.to_csv(index=False)
+                st.download_button(
+                    "Export CSV",
+                    csv_export,
+                    file_name="sgo_results.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+        else:
+            csv_export = df_result.to_csv(index=False)
+            st.download_button(
+                "Export CSV",
+                csv_export,
+                file_name="sgo_results.csv",
+                mime="text/csv",
+            )
 
 
 def _run_validation(opt, processed, summary) -> list[dict]:
@@ -898,6 +1046,11 @@ def _run_validation(opt, processed, summary) -> list[dict]:
 
 
 def main():
+    st.set_page_config(
+        page_title="Steel Grating Optimizer",
+        page_icon="🏭",
+        layout="wide",
+    )
     if st.session_state.get("authenticated"):
         main_app()
     else:

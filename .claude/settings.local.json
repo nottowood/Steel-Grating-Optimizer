@@ -20,7 +20,16 @@
       "PowerShell(Start-Sleep -Seconds 5; try { $r = Invoke-WebRequest -Uri \"http://localhost:8501\" -UseBasicParsing -TimeoutSec 5; Write-Output \"HTTP $\\($r.StatusCode\\) - Server running\" } catch { Write-Output \"Server not ready: $_\" })",
       "Bash(python -c *)",
       "PowerShell(Get-Process python -ErrorAction SilentlyContinue)",
-      "PowerShell(Stop-Process -Name python -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; $proc = Start-Process -FilePath \"python\" -ArgumentList \"-m\", \"streamlit\", \"run\", \"app.py\", \"--server.port\", \"8501\" -WorkingDirectory \"M:\\\\7 E&M\\\\7 E&M\\\\Nutthawut Computer\\\\Training\\\\AI Coding\\\\SGOP\" -PassThru -RedirectStandardError \"M:\\\\7 E&M\\\\7 E&M\\\\Nutthawut Computer\\\\Training\\\\AI Coding\\\\SGOP\\\\stderr.log\"; $proc.Id)"
+      "PowerShell(Stop-Process -Name python -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; $proc = Start-Process -FilePath \"python\" -ArgumentList \"-m\", \"streamlit\", \"run\", \"app.py\", \"--server.port\", \"8501\" -WorkingDirectory \"M:\\\\7 E&M\\\\7 E&M\\\\Nutthawut Computer\\\\Training\\\\AI Coding\\\\SGOP\" -PassThru -RedirectStandardError \"M:\\\\7 E&M\\\\7 E&M\\\\Nutthawut Computer\\\\Training\\\\AI Coding\\\\SGOP\\\\stderr.log\"; $proc.Id)",
+      "Bash(curl -s http://localhost:8501)",
+      "Bash(python -X utf8 test_regression.py)",
+      "Bash(python -X utf8 -c \"import ast; ast.parse\\(open\\('app.py', encoding='utf-8'\\).read\\(\\)\\); print\\('SYNTAX: PASS'\\)\")",
+      "Bash(python -m pytest test_regression.py -v)",
+      "Bash(python test_regression.py)",
+      "Bash(PYTHONIOENCODING=utf-8 python -m streamlit run app.py --server.headless true --server.port 8501)",
+      "Bash(tasklist)",
+      "Bash(taskkill //F //PID 23724)",
+      "Bash(PYTHONIOENCODING=utf-8 streamlit run app.py --server.headless true --server.port 8501)"
     ]
   }
 }

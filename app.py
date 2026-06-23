@@ -819,17 +819,24 @@ def render_import_page():
             cutting_plan = packing_rpt["cutting_plan"]
             cp_rows = []
             for cp in cutting_plan:
-                marks_text = ", ".join(
-                    f"{e['mark']} x {e['qty']}" for e in cp["entries"]
-                )
+                entry_labels = []
+                notes = []
+                for e in cp["entries"]:
+                    entry_labels.append(f"{e['mark']} x {e['qty']}")
+                    if e.get("note"):
+                        notes.append(f"{e['mark']}: {e['note']}")
+                marks_text = ", ".join(entry_labels)
+                note_text = "; ".join(notes)
+
                 cp_rows.append({
                     "Bar": cp["bin_id"],
                     "Width (mm)": cp["stock_width"],
                     "Marks": marks_text,
                     "Panels": cp["total_panels"],
-                    "Used (mm)": cp["total_used"],
-                    "Remnant (mm)": cp["remnant_length"],
+                    "Used (mm)": cp["total_used"] if cp["total_used"] is not None else "—",
+                    "Remnant (mm)": cp["remnant_length"] if cp["remnant_length"] is not None else "—",
                     "Classification": cp["remnant_classification"],
+                    "Note": note_text,
                 })
             st.dataframe(pd.DataFrame(cp_rows), use_container_width=True, hide_index=True)
 

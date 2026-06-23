@@ -13,6 +13,7 @@ from packing_models import (
     ALGORITHM_ID,
     CutPlan,
     CutPlanEntry,
+    ExcludedPanel,
     LengthRemnant,
     PackingSummary,
     classify_length_remnant,
@@ -55,11 +56,16 @@ def group_panels_for_packing(
         if group_key not in groups:
             groups[group_key] = []
 
+        note = ""
+        if panel.needs_reduction:
+            note = f"reduce {panel.reduction_width:.0f}mm"
+
         groups[group_key].append({
             "mark": panel.mark,
             "product_code": panel.product_code,
             "fabricated_length": panel.fabricated_length,
             "qty": panel.qty,
+            "note": note,
         })
 
     return groups, excluded
@@ -74,6 +80,7 @@ def _expand_to_units(group: list[dict]) -> list[dict]:
                 "mark": item["mark"],
                 "product_code": item["product_code"],
                 "fabricated_length": item["fabricated_length"],
+                "note": item.get("note", ""),
             })
     return units
 
@@ -81,12 +88,16 @@ def _expand_to_units(group: list[dict]) -> list[dict]:
 def _group_bin_entries(raw_entries: list[dict]) -> list[CutPlanEntry]:
     """Group identical (mark, product_code, length) into CutPlanEntry with qty."""
     counts: dict[tuple, int] = {}
+    notes: dict[tuple, str] = {}
     for e in raw_entries:
         key = (e["mark"], e["product_code"], e["fabricated_length"])
         counts[key] = counts.get(key, 0) + 1
+        if e.get("note"):
+            notes[key] = e["note"]
 
     return [
-        CutPlanEntry(mark=m, product_code=pc, fabricated_length=fl, qty=q)
+        CutPlanEntry(mark=m, product_code=pc, fabricated_length=fl, qty=q,
+                     note=notes.get((m, pc, fl), ""))
         for (m, pc, fl), q in counts.items()
     ]
 
@@ -184,6 +195,21 @@ def run_length_packing(
                     mck=cp.mck,
                 ))
 
+    excluded_info = []
+    for p in excluded:
+        reason = "expansion" if p.needs_expansion else "no_product"
+        excluded_info.append(ExcludedPanel(
+            mark=p.mark,
+            product_code=p.product_code,
+            fabricated_width=p.fabricated_width,
+            fabricated_length=p.fabricated_length,
+            standard_width=p.standard_width,
+            qty=p.qty,
+            reason=reason,
+            expansion_width=p.expansion_width,
+            reduction_width=p.reduction_width,
+        ))
+
     excluded_items = sum(p.qty for p in excluded)
     stock_before = total_items_packed + excluded_items
     stock_after = len(all_cut_plans) + excluded_items
@@ -246,4 +272,5 @@ def run_length_packing(
         algorithm=ALGORITHM_ID,
         cut_plans=all_cut_plans,
         length_remnants=all_remnants,
+        excluded_panels=excluded_info,
     )

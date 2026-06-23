@@ -148,15 +148,22 @@ def generate_pdf(summary, packing_report, packing_summary,
     for cp in cutting_plan:
         marks_text = ", ".join(f"{e['mark']} × {e['qty']}" for e in cp["entries"])
 
+        used_text = f"{cp['total_used']:.0f} mm" if cp["total_used"] is not None else "—"
+        remnant_text = f"{cp['remnant_length']:.0f} mm" if cp["remnant_length"] is not None else "—"
+        note_parts = [f"{e['mark']}: {e['note']}" for e in cp["entries"] if e.get("note")]
+        note_text = "; ".join(note_parts)
+
         header_rows = [
             ["BAR", cp["bin_id"]],
             ["Width", f"{cp['stock_width']:.0f} mm"],
             ["Marks", marks_text],
             ["Panels", str(cp["total_panels"])],
-            ["Used Length", f"{cp['total_used']:.0f} mm"],
-            ["Remnant", f"{cp['remnant_length']:.0f} mm"],
+            ["Used Length", used_text],
+            ["Remnant", remnant_text],
             ["Classification", cp["remnant_classification"]],
         ]
+        if note_text:
+            header_rows.append(["Note", note_text])
 
         t = Table(header_rows, colWidths=[35 * mm, 130 * mm])
         bg = colors.HexColor("#e8f5e9") if cp["remnant_classification"] == "REUSABLE_REMNANT" else (

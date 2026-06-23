@@ -113,21 +113,30 @@ def generate_excel(summary, packing_report, packing_summary,
 
     # === Sheet 2: Production Cutting Plan ===
     ws2 = wb.create_sheet("Cutting Plan")
-    headers = ["Bar", "Width (mm)", "Marks", "Panels", "Used (mm)", "Remnant (mm)", "Classification"]
+    headers = ["Bar", "Width (mm)", "Marks", "Panels", "Used (mm)", "Remnant (mm)", "Classification", "Note"]
     for col, h in enumerate(headers, 1):
         ws2.cell(row=1, column=col, value=h)
     _style_header(ws2, 1, len(headers))
 
     cutting_plan = packing_report["cutting_plan"]
     for i, cp in enumerate(cutting_plan, start=2):
-        marks_text = ", ".join(f"{e['mark']} x {e['qty']}" for e in cp["entries"])
+        entry_labels = []
+        notes = []
+        for e in cp["entries"]:
+            entry_labels.append(f"{e['mark']} x {e['qty']}")
+            if e.get("note"):
+                notes.append(f"{e['mark']}: {e['note']}")
+        marks_text = ", ".join(entry_labels)
+        note_text = "; ".join(notes)
+
         ws2.cell(row=i, column=1, value=cp["bin_id"])
         ws2.cell(row=i, column=2, value=cp["stock_width"])
         ws2.cell(row=i, column=3, value=marks_text)
         ws2.cell(row=i, column=4, value=cp["total_panels"])
-        ws2.cell(row=i, column=5, value=cp["total_used"])
-        ws2.cell(row=i, column=6, value=cp["remnant_length"])
+        ws2.cell(row=i, column=5, value=cp["total_used"] if cp["total_used"] is not None else "—")
+        ws2.cell(row=i, column=6, value=cp["remnant_length"] if cp["remnant_length"] is not None else "—")
         ws2.cell(row=i, column=7, value=cp["remnant_classification"])
+        ws2.cell(row=i, column=8, value=note_text)
 
     _style_data(ws2, 2, len(cutting_plan) + 1, len(headers))
     _auto_width(ws2, len(headers))

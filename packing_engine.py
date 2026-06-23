@@ -189,10 +189,6 @@ def run_length_packing(
     stock_after = len(all_cut_plans) + excluded_items
     stock_savings = stock_before - stock_after
 
-    total_packed_length = sum(cp.total_used for cp in all_cut_plans)
-    total_bin_capacity = len(all_cut_plans) * STOCK_LENGTH
-    utilization = (total_packed_length / total_bin_capacity * 100.0) if total_bin_capacity > 0 else 0.0
-
     raw_material_area = sum(
         cp.stock_length / 1000.0 * (cp.stock_width / 1000.0)
         for cp in all_cut_plans
@@ -207,6 +203,8 @@ def run_length_packing(
         p.fabricated_length / 1000.0 * (p.standard_width_used / 1000.0) * p.qty
         for p in excluded
     )
+    utilization = (product_area / raw_material_area * 100.0) if raw_material_area > 0 else 0.0
+
     kerf_loss_area = sum(
         cp.total_panels * SAW_KERF / 1000.0 * (cp.stock_width / 1000.0)
         for cp in all_cut_plans

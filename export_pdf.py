@@ -148,16 +148,18 @@ def generate_pdf(summary, packing_report, packing_summary,
     for cp in cutting_plan:
         marks_text = ", ".join(f"{e['mark']} × {e['qty']}" for e in cp["entries"])
 
-        used_text = f"{cp['total_used']:.0f} mm" if cp["total_used"] is not None else "—"
-        remnant_text = f"{cp['remnant_length']:.0f} mm" if cp["remnant_length"] is not None else "—"
+        width_text = f"{cp['stock_width']:.0f} mm" if cp.get("stock_width") is not None else "—"
+        used_text = f"{cp['total_used']:.0f} mm" if cp.get("total_used") is not None else "—"
+        remnant_text = f"{cp['remnant_length']:.0f} mm" if cp.get("remnant_length") is not None else "—"
+        panels_text = str(cp["total_panels"]) if cp.get("total_panels") is not None else "—"
         note_parts = [f"{e['mark']}: {e['note']}" for e in cp["entries"] if e.get("note")]
         note_text = "; ".join(note_parts)
 
         header_rows = [
             ["BAR", cp["bin_id"]],
-            ["Width", f"{cp['stock_width']:.0f} mm"],
+            ["Width", width_text],
             ["Marks", marks_text],
-            ["Panels", str(cp["total_panels"])],
+            ["Panels", panels_text],
             ["Used Length", used_text],
             ["Remnant", remnant_text],
             ["Classification", cp["remnant_classification"]],

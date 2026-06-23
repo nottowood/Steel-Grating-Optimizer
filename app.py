@@ -830,11 +830,11 @@ def render_import_page():
 
                 cp_rows.append({
                     "Bar": cp["bin_id"],
-                    "Width (mm)": cp["stock_width"],
+                    "Width (mm)": str(cp["stock_width"]) if cp.get("stock_width") is not None else "",
                     "Marks": marks_text,
-                    "Panels": cp["total_panels"],
-                    "Used (mm)": cp["total_used"] if cp["total_used"] is not None else "—",
-                    "Remnant (mm)": cp["remnant_length"] if cp["remnant_length"] is not None else "—",
+                    "Panels": str(cp["total_panels"]) if cp.get("total_panels") is not None else "",
+                    "Used (mm)": str(cp["total_used"]) if cp.get("total_used") is not None else "",
+                    "Remnant (mm)": str(cp["remnant_length"]) if cp.get("remnant_length") is not None else "",
                     "Classification": cp["remnant_classification"],
                     "Note": note_text,
                 })

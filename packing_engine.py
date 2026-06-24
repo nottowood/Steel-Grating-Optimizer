@@ -13,7 +13,6 @@ from packing_models import (
     ALGORITHM_ID,
     CutPlan,
     CutPlanEntry,
-    ExcludedPanel,
     LengthRemnant,
     PackingSummary,
     classify_length_remnant,
@@ -27,6 +26,9 @@ def group_panels_for_packing(
 ) -> tuple[dict[tuple, list[dict]], list[FabricatedPanel]]:
     """Group panels by (standard_width, MCK) applying G1-G3 rules.
 
+    Expansion panels are split into P1 (standard width) and P2 (extension
+    strip). Both enter FFD packing in their respective width groups.
+
     Returns:
         (groups dict keyed by (std_width, mck), excluded panels list)
     """
@@ -37,10 +39,6 @@ def group_panels_for_packing(
     excluded: list[FabricatedPanel] = []
 
     for panel in panels:
-        if panel.needs_expansion:
-            excluded.append(panel)
-            continue
-
         product = lookup_product(panel.product_code, catalog)
         if product is None:
             excluded.append(panel)
@@ -52,21 +50,45 @@ def group_panels_for_packing(
         std_width = panel.standard_width
         mck = (pitch, depth, thickness)
 
-        group_key = (std_width, mck)
-        if group_key not in groups:
-            groups[group_key] = []
+        if panel.needs_expansion:
+            p1_key = (std_width, mck)
+            if p1_key not in groups:
+                groups[p1_key] = []
+            groups[p1_key].append({
+                "mark": f"{panel.mark}-P1",
+                "product_code": panel.product_code,
+                "fabricated_length": panel.fabricated_length,
+                "qty": panel.qty,
+                "note": f"expand P1 (std {std_width:.0f}mm)",
+            })
 
-        note = ""
-        if panel.needs_reduction:
-            note = f"reduce {panel.reduction_width:.0f}mm"
+            p2_width = panel.expansion_width
+            p2_key = (p2_width, mck)
+            if p2_key not in groups:
+                groups[p2_key] = []
+            groups[p2_key].append({
+                "mark": f"{panel.mark}-P2",
+                "product_code": panel.product_code,
+                "fabricated_length": panel.fabricated_length,
+                "qty": panel.qty,
+                "note": f"expand P2 (extend {p2_width:.0f}mm)",
+            })
+        else:
+            group_key = (std_width, mck)
+            if group_key not in groups:
+                groups[group_key] = []
 
-        groups[group_key].append({
-            "mark": panel.mark,
-            "product_code": panel.product_code,
-            "fabricated_length": panel.fabricated_length,
-            "qty": panel.qty,
-            "note": note,
-        })
+            note = ""
+            if panel.needs_reduction:
+                note = f"reduce {panel.reduction_width:.0f}mm"
+
+            groups[group_key].append({
+                "mark": panel.mark,
+                "product_code": panel.product_code,
+                "fabricated_length": panel.fabricated_length,
+                "qty": panel.qty,
+                "note": note,
+            })
 
     return groups, excluded
 
@@ -103,7 +125,7 @@ def _group_bin_entries(raw_entries: list[dict]) -> list[CutPlanEntry]:
 
 
 def _ffd_pack(units: list[dict], stock_length: float, saw_kerf: float,
-              stock_width: float, mck: tuple) -> list[CutPlan]:
+              stock_width: float, mck: tuple, start_bin: int = 1) -> list[CutPlan]:
     """First Fit Decreasing bin packing.
 
     Kerf model: N cuts for N panels. Each panel consumes
@@ -130,7 +152,7 @@ def _ffd_pack(units: list[dict], stock_length: float, saw_kerf: float,
             remaining.append(stock_length - needed)
 
     cut_plans = []
-    for i, raw_entries in enumerate(bins, start=1):
+    for i, raw_entries in enumerate(bins, start=start_bin):
         bin_id = f"BIN-{i:03d}"
         n_panels = len(raw_entries)
         panel_length_sum = sum(e["fabricated_length"] for e in raw_entries)
@@ -170,13 +192,15 @@ def run_length_packing(
     all_remnants: list[LengthRemnant] = []
     total_items_packed = 0
     marks_packed: set[str] = set()
+    next_bin = 1
 
     for (std_width, mck), group in groups.items():
         units = _expand_to_units(group)
         if not units:
             continue
 
-        cut_plans = _ffd_pack(units, STOCK_LENGTH, SAW_KERF, std_width, mck)
+        cut_plans = _ffd_pack(units, STOCK_LENGTH, SAW_KERF, std_width, mck, start_bin=next_bin)
+        next_bin += len(cut_plans)
         all_cut_plans.extend(cut_plans)
 
         for cp in cut_plans:
@@ -195,21 +219,6 @@ def run_length_packing(
                     mck=cp.mck,
                 ))
 
-    excluded_info = []
-    for p in excluded:
-        reason = "expansion" if p.needs_expansion else "no_product"
-        excluded_info.append(ExcludedPanel(
-            mark=p.mark,
-            product_code=p.product_code,
-            fabricated_width=p.fabricated_width,
-            fabricated_length=p.fabricated_length,
-            standard_width=p.standard_width,
-            qty=p.qty,
-            reason=reason,
-            expansion_width=p.expansion_width,
-            reduction_width=p.reduction_width,
-        ))
-
     excluded_items = sum(p.qty for p in excluded)
     stock_before = total_items_packed + excluded_items
     stock_after = len(all_cut_plans) + excluded_items
@@ -218,38 +227,20 @@ def run_length_packing(
     raw_material_area = sum(
         cp.stock_length / 1000.0 * (cp.stock_width / 1000.0)
         for cp in all_cut_plans
-    ) + sum(
-        STOCK_LENGTH / 1000.0 * (p.standard_width_used / 1000.0) * p.qty
-        for p in excluded
     )
     product_area = sum(
         e.fabricated_length / 1000.0 * (cp.stock_width / 1000.0) * e.qty
         for cp in all_cut_plans for e in cp.entries
-    ) + sum(
-        p.fabricated_length / 1000.0 * (p.standard_width_used / 1000.0) * p.qty
-        for p in excluded
     )
     utilization = (product_area / raw_material_area * 100.0) if raw_material_area > 0 else 0.0
 
     kerf_loss_area = sum(
         cp.total_panels * SAW_KERF / 1000.0 * (cp.stock_width / 1000.0)
         for cp in all_cut_plans
-    ) + sum(
-        SAW_KERF / 1000.0 * (p.standard_width_used / 1000.0) * p.qty
-        for p in excluded
     )
 
     reusable_m2 = sum(r.remnant_area_m2 for r in all_remnants if r.classification == "REUSABLE_REMNANT")
     waste_m2 = sum(r.remnant_area_m2 for r in all_remnants if r.classification == "LENGTH_WASTE")
-
-    for p in excluded:
-        exc_rem = STOCK_LENGTH - p.fabricated_length - SAW_KERF
-        exc_class = classify_length_remnant(exc_rem, p.standard_width_used)
-        exc_area = (exc_rem / 1000.0) * (p.standard_width_used / 1000.0)
-        if exc_class == "REUSABLE_REMNANT":
-            reusable_m2 += exc_area * p.qty
-        elif exc_class == "LENGTH_WASTE":
-            waste_m2 += exc_area * p.qty
 
     total_waste = waste_m2 + kerf_loss_area
 
@@ -272,5 +263,4 @@ def run_length_packing(
         algorithm=ALGORITHM_ID,
         cut_plans=all_cut_plans,
         length_remnants=all_remnants,
-        excluded_panels=excluded_info,
     )

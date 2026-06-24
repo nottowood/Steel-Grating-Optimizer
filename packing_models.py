@@ -23,19 +23,6 @@ class CutPlanEntry:
 
 
 @dataclass
-class ExcludedPanel:
-    mark: str
-    product_code: str
-    fabricated_width: float
-    fabricated_length: float
-    standard_width: float
-    qty: int
-    reason: str
-    expansion_width: float = 0.0
-    reduction_width: float = 0.0
-
-
-@dataclass
 class CutPlan:
     bin_id: str
     stock_width: float
@@ -80,7 +67,6 @@ class PackingSummary:
     algorithm: str = ALGORITHM_ID
     cut_plans: list[CutPlan] = field(default_factory=list)
     length_remnants: list[LengthRemnant] = field(default_factory=list)
-    excluded_panels: list[ExcludedPanel] = field(default_factory=list)
 
 
 def classify_length_remnant(remnant_length: float, stock_width: float) -> str:

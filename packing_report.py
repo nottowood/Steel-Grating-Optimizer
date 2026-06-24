@@ -69,42 +69,7 @@ def generate_packing_report(
             "remnant_length": cp.remnant_length,
             "remnant_classification": cp.remnant_classification,
             "display": f"Bar {cp.bin_id}: {marks}, {remnant_text}",
-            "is_excluded": False,
         })
-
-    for ep in packing.excluded_panels:
-        if ep.reason == "expansion":
-            p1_label = f"{ep.mark}-P1 x {ep.qty}"
-            p2_label = f"{ep.mark}-P2 x {ep.qty} (extend {ep.expansion_width:.0f}mm)"
-            marks = f"{p1_label}, {p2_label}"
-            display = f"Bar {ep.mark}: {marks} — EXPANSION (1 bar per piece)"
-            cutting_plan.append({
-                "bin_id": ep.mark,
-                "stock_width": ep.standard_width,
-                "mck": None,
-                "entries": [
-                    {
-                        "mark": f"{ep.mark}-P1",
-                        "product_code": ep.product_code,
-                        "fabricated_length": ep.fabricated_length,
-                        "qty": ep.qty,
-                        "note": f"std width {ep.standard_width:.0f}mm",
-                    },
-                    {
-                        "mark": f"{ep.mark}-P2",
-                        "product_code": ep.product_code,
-                        "fabricated_length": ep.fabricated_length,
-                        "qty": ep.qty,
-                        "note": f"extend {ep.expansion_width:.0f}mm",
-                    },
-                ],
-                "total_panels": ep.qty,
-                "total_used": None,
-                "remnant_length": None,
-                "remnant_classification": "EXPANSION",
-                "display": display,
-                "is_excluded": True,
-            })
 
     return {
         "summary": summary,
